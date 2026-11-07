@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Islamicdays</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="page-header">
+        <div>
+          <p class="eyebrow">Islamic calendar</p>
+          <h1>Islamicdays</h1>
+        </div>
+      </header>
+
+      <section class="controls card">
+        <label>
+          <span>Month</span>
+          <select id="month"></select>
+        </label>
+        <label>
+          <span>Year</span>
+          <input id="year" type="number" min="1900" max="2100" step="1" />
+        </label>
+        <button id="loadButton" type="button">Load calendar</button>
+        <button id="locationButton" type="button" class="secondary-button">Use my location</button>
+      </section>
+
+      <section class="night-window card">
+        <div class="calendar-header">
+          <h2>ثلث الليل الأخير</h2>
+        </div>
+        <div id="nightWindowStatus" class="status">Loading night prayer window...</div>
+        <div id="nightWindowDetails" class="night-window-details"></div>
+      </section>
+
+      <section class="calendar card">
+        <div class="calendar-header">
+          <h2 id="calendarTitle">Calendar</h2>
+        </div>
+        <div id="status" class="status">Loading calendar...</div>
+        <div id="calendarGrid" class="calendar-grid"></div>
+      </section>
+    </main>
+
+    <script>
+      const monthSelect = document.getElementById('month');
+      const yearInput = document.getElementById('year');
+      const calendarTitle = document.getElementById('calendarTitle');
+      const calendarGrid = document.getElementById('calendarGrid');
+      const status = document.getElementById('status');
+      const nightWindowStatus = document.getElementById('nightWindowStatus');
+      const nightWindowDetails = document.getElementById('nightWindowDetails');
+      const loadButton = document.getElementById('loadButton');
+      const locationButton = document.getElementById('locationButton');
+      let currentLocation = null;
+
+      const monthNames = [
+        'January', 'February', 'March', 'April', 'May', 'June',
+        'July', 'August', 'September', 'October', 'November', 'December'
+      ];
+
+      function populateMonthOptions() {
+        monthSelect.innerHTML = monthNames.map((name, index) => `
+          <option value="${index + 1}">${name}</option>
+        `).join('');
+      }
+
+      function setDefaultDate() {
+        const today = new Date();
+        monthSelect.value = String(today.getMonth() + 1);
+        yearInput.value = String(today.getFullYear());
+      }
+
+      function formatHijriDate(item) {
+        const hijri = item.hijri || {};
+        const gregorian = item.gregorian || {};
+        const dayNumber = Number(hijri.day || 0);
+        const isWhiteDay = [13, 14, 15].includes(dayNumber);
+
+        return {
+          gregorianDate: `${gregorian.day || '--'}-${gregorian.month?.number || '--'}-${gregorian.year || '----'}`,
+          hijriDate: hijri.date || 'Unknown',
+          weekday: hijri.weekday?.en || 'Unknown weekday',
+          month: hijri.month?.en || 'Unknown month',
+          year: hijri.year || '----',
+          isWhiteDay,
+          whiteDayLabel: isWhiteDay ? 'الأيام البيض' : 'Regular day'
+        };
+      }
+
+      function renderCalendar(data) {
+        if (!Array.isArray(data) || data.length === 0) {
+          calendarGrid.innerHTML = '<p class="empty-state">No calendar data available.</p>';
+          return;
+        }
+
+        calendarGrid.innerHTML = data.map((entry) => {
+          const formatted = formatHijriDate(entry);
+          return `
+            <article class="day-card${formatted.isWhiteDay ? ' white-day' : ''}">
+              <div class="day-meta">${formatted.gregorianDate}</div>
+              ${formatted.isWhiteDay ? '<span class="white-badge">الأيام البيض</span>' : ''}
+              <h3>${formatted.hijriDate}</h3>
+              <p>${formatted.weekday}</p>
+              <p>${formatted.month} ${formatted.year}</p>
+            </article>
+          `;
+        }).join('');
+      }
+
+      function getSelectedDateString() {
+        const selectedYear = Number(yearInput.value || new Date().getFullYear());
+        const selectedMonth = Number(monthSelect.value || new Date().getMonth() + 1);
+        const today = new Date();
+        const day = (
+          today.getFullYear() === selectedYear &&
+          today.getMonth() + 1 === selectedMonth
+        ) ? today.getDate() : 1;
+
+        return `${String(day).padStart(2, '0')}-${String(selectedMonth).padStart(2, '0')}-${selectedYear}`;
+      }
+
+      function getMapLink(latitude, longitude) {
+        return `https://www.openstreetmap.org/?mlat=${latitude}&mlon=${longitude}#map=12/${latitude}/${longitude}`;
+      }
+
+      async function loadNightWindow(location = currentLocation) {
+        const dateString = getSelectedDateString();
+        if (!location) {
+          nightWindowStatus.textContent = 'Allow location access to calculate prayer times for your area.';
+          nightWindowDetails.innerHTML = '<p class="empty-state">Use the location button to try again.</p>';
+          return;
+        }
+
+        const url = new URL('/api/night-window', window.location.origin);
+        url.searchParams.set('date', dateString);
+        url.searchParams.set('latitude', String(location.latitude));
+        url.searchParams.set('longitude', String(location.longitude));
+
+        nightWindowStatus.textContent = 'Loading prayer window for your location...';
+        nightWindowDetails.innerHTML = '';
+
+        try {
+          const response = await fetch(url);
+          const payload = await response.json();
+
+          if (!response.ok) {
+            throw new Error(payload.error || 'Unable to fetch night prayer data.');
+          }
+
+          if (!payload.lastThird) {
+            throw new Error('No prayer timing data available for the selected date.');
+          }
+
+          const label = payload.locationName || [payload.city, payload.country].filter(Boolean).join(', ').trim();
+          const isCoordinateLocation = typeof payload.latitude === 'number' && typeof payload.longitude === 'number';
+          const openMapHtml = isCoordinateLocation
+            ? `<a href="${getMapLink(payload.latitude, payload.longitude)}" target="_blank" rel="noopener noreferrer">Open in OpenStreetMap</a>`
+            : '';
+
+          nightWindowStatus.textContent = label ? `للـ ${label}` : 'Night prayer window';
+          nightWindowDetails.innerHTML = `
+            <div class="night-window-range">
+              <span class="night-window-label">${payload.lastThird.title}</span>
+              <strong>${payload.lastThird.start} - ${payload.lastThird.end}</strong>
+            </div>
+            <p>${payload.lastThird.description}</p>
+            ${openMapHtml ? `<p class="map-link">${openMapHtml}</p>` : ''}
+          `;
+        } catch (error) {
+          nightWindowStatus.textContent = `Unable to update prayer times: ${error.message}`;
+          nightWindowDetails.innerHTML = '<p class="empty-state">Unable to load the night prayer window.</p>';
+        }
+      }
+
+      function requestCurrentLocation() {
+        if (!navigator.geolocation) {
+          nightWindowStatus.textContent = 'Location access is not supported by this browser.';
+          nightWindowDetails.innerHTML = '<p class="empty-state">Use a browser with location support to calculate local prayer times.</p>';
+          return;
+        }
+
+        locationButton.disabled = true;
+        nightWindowStatus.textContent = 'Finding your location...';
+        nightWindowDetails.innerHTML = '';
+
+        navigator.geolocation.getCurrentPosition(
+          (position) => {
+            currentLocation = {
+              latitude: position.coords.latitude,
+              longitude: position.coords.longitude
+            };
+            locationButton.disabled = false;
+            loadNightWindow();
+          },
+          (error) => {
+            locationButton.disabled = false;
+            const message = error.code === error.PERMISSION_DENIED
+              ? 'Location permission was denied. Allow location access in your browser, then try again.'
+              : 'Unable to determine your location. Check location services and try again.';
+            nightWindowStatus.textContent = message;
+            nightWindowDetails.innerHTML = '<p class="empty-state">Prayer times need your location. No default city is used.</p>';
+          },
+          { enableHighAccuracy: true, timeout: 15000, maximumAge: 300000 }
+        );
+      }
+
+      async function loadCalendar() {
+        const month = monthSelect.value;
+        const year = yearInput.value;
+
+        calendarTitle.textContent = `${monthNames[Number(month) - 1]} ${year}`;
+        status.textContent = 'Loading calendar...';
+        calendarGrid.innerHTML = '';
+
+        try {
+          const response = await fetch(`/api/calendar?month=${month}&year=${year}`);
+          const payload = await response.json();
+
+          if (!response.ok) {
+            throw new Error(payload.error || 'Unable to fetch calendar data.');
+          }
+
+          const data = Array.isArray(payload.data) ? payload.data : [];
+          renderCalendar(data);
+
+          const whiteDaysCount = data.filter((entry) => formatHijriDate(entry).isWhiteDay).length;
+          status.textContent = `${data.length} entries loaded • ${whiteDaysCount} white day${whiteDaysCount === 1 ? '' : 's'}`;
+        } catch (error) {
+          status.textContent = error.message;
+          calendarGrid.innerHTML = '<p class="empty-state">Please try a different month or year.</p>';
+        }
+
+        if (currentLocation) {
+          await loadNightWindow();
+        }
+      }
+
+      locationButton.addEventListener('click', requestCurrentLocation);
+
+      populateMonthOptions();
+      setDefaultDate();
+      loadButton.addEventListener('click', loadCalendar);
+      loadCalendar();
+      requestCurrentLocation();
+    </script>
+  </body>
+</html>

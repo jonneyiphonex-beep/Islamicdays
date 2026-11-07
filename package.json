@@ -1,0 +1,20 @@
+{
+  "name": "islamicdays",
+  "version": "1.0.0",
+  "description": "A simple Islamic calendar app powered by the Al Adhan API.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "keywords": [
+    "islamic",
+    "calendar",
+    "hijri",
+    "aladhan"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.19.2"
+  }
+}
