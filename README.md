@@ -11,6 +11,10 @@ npm start
 
 Then open http://localhost:3000 in your browser.
 
+## Deploy to GitHub Pages
+
+The GitHub Actions workflow publishes the `public` directory to GitHub Pages whenever changes are pushed to `main`. Enable **GitHub Actions** as the Pages build and deployment source in the repository's Pages settings. The site is then available at https://jonneyiphonex-beep.github.io/Islamicdays/. The static site calls the Al Adhan API directly from the browser and does not require the Express server.
+
 ## Features
 
 - Select any Gregorian month and year

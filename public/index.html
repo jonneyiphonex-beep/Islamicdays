@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Islamicdays</title>
-    <link rel="stylesheet" href="/styles.css" />
+    <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
     <main class="app-shell">
@@ -127,6 +127,55 @@
         return `https://www.openstreetmap.org/?mlat=${latitude}&mlon=${longitude}#map=12/${latitude}/${longitude}`;
       }
 
+      async function fetchAlAdhanData(url, fallbackMessage) {
+        const response = await fetch(url);
+        const payload = await response.json();
+
+        if (!response.ok || payload.code !== 200) {
+          throw new Error(payload.status || fallbackMessage);
+        }
+
+        return payload.data;
+      }
+
+      function parseTimingMinutes(value) {
+        if (typeof value !== 'string') {
+          return null;
+        }
+
+        const match = value.trim().match(/^(\d{1,2}):(\d{2})/);
+        if (!match) {
+          return null;
+        }
+
+        return Number(match[1]) * 60 + Number(match[2]);
+      }
+
+      function normalizeClock(totalMinutes) {
+        const normalized = Math.round(((totalMinutes % 1440) + 1440) % 1440);
+        const hours = Math.floor(normalized / 60);
+        const minutes = normalized % 60;
+        return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
+      }
+
+      function calculateLastThirdWindow(timings) {
+        const fajr = parseTimingMinutes(timings.Fajr);
+        const lastThirdStart = parseTimingMinutes(timings.Lastthird);
+
+        if (fajr !== null && lastThirdStart !== null) {
+          return { start: normalizeClock(lastThirdStart), end: normalizeClock(fajr) };
+        }
+
+        const maghrib = parseTimingMinutes(timings.Maghrib);
+        if (fajr === null || maghrib === null) {
+          return null;
+        }
+
+        const nightDuration = (fajr + (1440 - maghrib)) % 1440;
+        const fallbackStart = (maghrib + Math.round((nightDuration * 2) / 3)) % 1440;
+        return { start: normalizeClock(fallbackStart), end: normalizeClock(fajr) };
+      }
+
       async function loadNightWindow(location = currentLocation) {
         const dateString = getSelectedDateString();
         if (!location) {
@@ -135,39 +184,31 @@
           return;
         }
 
-        const url = new URL('/api/night-window', window.location.origin);
-        url.searchParams.set('date', dateString);
+        const url = new URL(`https://api.aladhan.com/v1/timings/${dateString}`);
         url.searchParams.set('latitude', String(location.latitude));
         url.searchParams.set('longitude', String(location.longitude));
+        url.searchParams.set('method', '5');
 
         nightWindowStatus.textContent = 'Loading prayer window for your location...';
         nightWindowDetails.innerHTML = '';
 
         try {
-          const response = await fetch(url);
-          const payload = await response.json();
-
-          if (!response.ok) {
-            throw new Error(payload.error || 'Unable to fetch night prayer data.');
-          }
-
-          if (!payload.lastThird) {
+          const data = await fetchAlAdhanData(url, 'Unable to fetch night prayer data.');
+          const lastThird = calculateLastThirdWindow(data.timings || {});
+          if (!lastThird) {
             throw new Error('No prayer timing data available for the selected date.');
           }
 
-          const label = payload.locationName || [payload.city, payload.country].filter(Boolean).join(', ').trim();
-          const isCoordinateLocation = typeof payload.latitude === 'number' && typeof payload.longitude === 'number';
-          const openMapHtml = isCoordinateLocation
-            ? `<a href="${getMapLink(payload.latitude, payload.longitude)}" target="_blank" rel="noopener noreferrer">Open in OpenStreetMap</a>`
-            : '';
+          const label = `${location.latitude.toFixed(4)}, ${location.longitude.toFixed(4)}`;
+          const openMapHtml = `<a href="${getMapLink(location.latitude, location.longitude)}" target="_blank" rel="noopener noreferrer">Open in OpenStreetMap</a>`;
 
           nightWindowStatus.textContent = label ? `للـ ${label}` : 'Night prayer window';
           nightWindowDetails.innerHTML = `
             <div class="night-window-range">
-              <span class="night-window-label">${payload.lastThird.title}</span>
-              <strong>${payload.lastThird.start} - ${payload.lastThird.end}</strong>
+              <span class="night-window-label">ثلث الليل الأخير</span>
+              <strong>${lastThird.start} - ${lastThird.end}</strong>
             </div>
-            <p>${payload.lastThird.description}</p>
+            <p>وقت التنزل الإلهي في آخر الثلث من الليل، مناسب للعبادة والصلاة.</p>
             ${openMapHtml ? `<p class="map-link">${openMapHtml}</p>` : ''}
           `;
         } catch (error) {
@@ -217,14 +258,9 @@
         calendarGrid.innerHTML = '';
 
         try {
-          const response = await fetch(`/api/calendar?month=${month}&year=${year}`);
-          const payload = await response.json();
-
-          if (!response.ok) {
-            throw new Error(payload.error || 'Unable to fetch calendar data.');
-          }
-
-          const data = Array.isArray(payload.data) ? payload.data : [];
+          const url = `https://api.aladhan.com/v1/gToHCalendar/${month}/${year}`;
+          const responseData = await fetchAlAdhanData(url, 'Unable to fetch calendar data.');
+          const data = Array.isArray(responseData) ? responseData : [];
           renderCalendar(data);
 
           const whiteDaysCount = data.filter((entry) => formatHijriDate(entry).isWhiteDay).length;
